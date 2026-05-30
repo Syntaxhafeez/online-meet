@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Meeting {
+  id           String           @id
+  title        String?
+  hostId       String?
+  status       MeetingStatus    @default(ACTIVE)
+  createdAt    DateTime         @default(now())
+  endedAt      DateTime?
+  participants Participant[]
+  messages     ChatMessage[]
+  sessions     MeetingSession[]
+}
+
+model Participant {
+  id           String            @id @default(cuid())
+  meetingId    String
+  displayName  String
+  socketId     String?
+  role         ParticipantRole   @default(PARTICIPANT)
+  status       ParticipantStatus @default(WAITING)
+  micEnabled   Boolean           @default(true)
+  cameraEnabled Boolean          @default(true)
+  screenSharing Boolean          @default(false)
+  joinedAt     DateTime?
+  leftAt       DateTime?
+  createdAt    DateTime          @default(now())
+  meeting      Meeting           @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  messages     ChatMessage[]
+
+  @@index([meetingId, status])
+  @@index([socketId])
+}
+
+model ChatMessage {
+  id            String      @id @default(cuid())
+  meetingId     String
+  participantId String?
+  senderName    String
+  body          String
+  type          MessageType @default(USER)
+  createdAt     DateTime    @default(now())
+  meeting       Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant   Participant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+
+  @@index([meetingId, createdAt])
+}
+
+model MeetingSession {
+  id        String   @id @default(cuid())
+  meetingId String
+  metadata  Json?
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+enum MeetingStatus {
+  ACTIVE
+  ENDED
+}
+
+enum ParticipantRole {
+  HOST
+  PARTICIPANT
+}
+
+enum ParticipantStatus {
+  WAITING
+  ADMITTED
+  REJECTED
+  LEFT
+}
+
+enum MessageType {
+  USER
+  SYSTEM
+}

@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 42 55% 97%;
+  --foreground: 35 34% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 35 34% 10%;
+  --muted: 42 36% 91%;
+  --muted-foreground: 36 18% 31%;
+  --border: 39 25% 78%;
+  --input: 39 24% 74%;
+  --ring: 41 82% 42%;
+  --primary: 41 82% 42%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 37 36% 19%;
+  --secondary-foreground: 44 72% 92%;
+  --destructive: 0 74% 52%;
+  --destructive-foreground: 0 0% 100%;
+}
+
+.dark {
+  --background: 36 28% 8%;
+  --foreground: 44 60% 94%;
+  --card: 36 24% 12%;
+  --card-foreground: 44 60% 94%;
+  --muted: 36 18% 18%;
+  --muted-foreground: 42 22% 72%;
+  --border: 37 22% 24%;
+  --input: 37 22% 27%;
+  --ring: 43 86% 55%;
+  --primary: 43 86% 56%;
+  --primary-foreground: 36 45% 10%;
+  --secondary: 39 38% 22%;
+  --secondary-foreground: 44 60% 90%;
+  --destructive: 0 72% 48%;
+  --destructive-foreground: 0 0% 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+video {
+  background: #17120a;
+}
