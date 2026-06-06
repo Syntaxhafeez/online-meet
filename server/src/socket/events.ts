@@ -1,5 +1,6 @@
 export const ClientEvents = {
   JoinMeeting: "join-meeting",
+  LeaveMeeting: "leave-meeting",
   RequestJoin: "request-join",
   AdmitUser: "admit-user",
   RejectUser: "reject-user",

@@ -18,6 +18,8 @@ type MeetingStore = {
   setScreenStream: (stream?: MediaStream) => void;
   addRemote: (track: RemoteTrack) => void;
   removeParticipantMedia: (participantId: string) => void;
+  removeParticipantMediaSource: (participantId: string, source: string) => void;
+  removeParticipant: (participantId: string) => void;
   setPinnedParticipantId: (id?: string) => void;
   addMessage: (message: ChatMessage) => void;
   setChatOpen: (open: boolean) => void;
@@ -41,7 +43,26 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
     set((state) => ({
       remotes: [...state.remotes.filter((remote) => remote.id !== track.id), track]
     })),
-  removeParticipantMedia: (participantId) => set((state) => ({ remotes: state.remotes.filter((remote) => remote.participantId !== participantId) })),
+  removeParticipantMedia: (participantId) =>
+    set((state) => {
+      state.remotes.filter((remote) => remote.participantId === participantId).forEach((remote) => remote.stream.getTracks().forEach((track) => track.stop()));
+      return { remotes: state.remotes.filter((remote) => remote.participantId !== participantId) };
+    }),
+  removeParticipantMediaSource: (participantId, source) =>
+    set((state) => {
+      const removed = state.remotes.filter((remote) => remote.participantId === participantId && remote.appData?.source === source);
+      removed.forEach((remote) => remote.stream.getTracks().forEach((track) => track.stop()));
+      return { remotes: state.remotes.filter((remote) => !(remote.participantId === participantId && remote.appData?.source === source)) };
+    }),
+  removeParticipant: (participantId) =>
+    set((state) => {
+      state.remotes.filter((remote) => remote.participantId === participantId).forEach((remote) => remote.stream.getTracks().forEach((track) => track.stop()));
+      return {
+        meeting: state.meeting ? { ...state.meeting, participants: state.meeting.participants.filter((participant) => participant.id !== participantId) } : state.meeting,
+        remotes: state.remotes.filter((remote) => remote.participantId !== participantId),
+        pinnedParticipantId: state.pinnedParticipantId === participantId ? undefined : state.pinnedParticipantId
+      };
+    }),
   setPinnedParticipantId: (pinnedParticipantId) => set({ pinnedParticipantId }),
   addMessage: (message) =>
     set((state) => ({

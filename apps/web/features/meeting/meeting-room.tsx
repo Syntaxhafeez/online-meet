@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Camera, CameraOff, Check, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorUp, Users, X } from "lucide-react";
+import { Bell, Camera, CameraOff, Check, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorOff, MonitorUp, Users, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -26,18 +26,31 @@ export function MeetingRoom({ meetingId, hostParticipantId }: { meetingId: strin
   useEffect(() => {
     let mounted = true;
     const socket = getSocket();
-    socket.on("meeting-state", store.setMeeting);
-    socket.on("new-message", store.addMessage);
-    socket.on("participant-updated", (participant) => {
+    const onMeetingState = store.setMeeting;
+    const onNewMessage = store.addMessage;
+    const onParticipantUpdated = (participant: NonNullable<typeof store.self>) => {
       const meeting = useMeetingStore.getState().meeting;
       if (meeting) store.setMeeting({ ...meeting, participants: meeting.participants.map((p) => (p.id === participant.id ? participant : p)) });
-    });
-    socket.on("join-requested", (participant) => {
+    };
+    const onJoinRequested = (participant: NonNullable<typeof store.self>) => {
       store.addRequest(participant);
       setToastDismissed(false);
       playJoinRequestTone();
-    });
-    socket.on("user-left", ({ participantId }) => store.removeParticipantMedia(participantId));
+    };
+    const onUserLeft = ({ participantId }: { participantId: string }) => {
+      meetMediaClient.removeParticipant(participantId);
+      store.removeParticipant(participantId);
+    };
+    const onProducerClosed = ({ participantId, source }: { participantId: string; source: string }) => {
+      meetMediaClient.removeParticipantSource(participantId, source);
+      store.removeParticipantMediaSource(participantId, source);
+    };
+    socket.on("meeting-state", onMeetingState);
+    socket.on("new-message", onNewMessage);
+    socket.on("participant-updated", onParticipantUpdated);
+    socket.on("join-requested", onJoinRequested);
+    socket.on("user-left", onUserLeft);
+    socket.on("mediasoup:producer-closed", onProducerClosed);
 
     async function boot() {
       try {
@@ -56,36 +69,64 @@ export function MeetingRoom({ meetingId, hostParticipantId }: { meetingId: strin
     void boot();
     return () => {
       mounted = false;
-      socket.off("meeting-state", store.setMeeting);
-      socket.off("new-message", store.addMessage);
+      socket.off("meeting-state", onMeetingState);
+      socket.off("new-message", onNewMessage);
+      socket.off("participant-updated", onParticipantUpdated);
+      socket.off("join-requested", onJoinRequested);
+      socket.off("user-left", onUserLeft);
+      socket.off("mediasoup:producer-closed", onProducerClosed);
+      const current = useMeetingStore.getState();
+      if (current.self) void emitAck("leave-meeting", { meetingId, participantId: current.self.id }).catch(() => undefined);
       meetMediaClient.close();
-      store.localStream?.getTracks().forEach((track) => track.stop());
-      store.screenStream?.getTracks().forEach((track) => track.stop());
+      current.localStream?.getTracks().forEach((track) => track.stop());
+      current.screenStream?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
   const participants = store.meeting?.participants.filter((participant) => participant.status === "ADMITTED") ?? [];
   const remoteVideos = store.remotes.filter((remote) => remote.kind === "video");
   const remoteAudios = store.remotes.filter((remote) => remote.kind === "audio");
-  const tileCount = Math.max(1, remoteVideos.length + 1);
+  const remoteParticipants = participants.filter((participant) => participant.id !== store.self?.id);
+  const tileCount = Math.max(1, participants.length);
   const gridClass = tileCount <= 2 ? "sm:grid-cols-2" : tileCount <= 4 ? "sm:grid-cols-2" : "sm:grid-cols-2 xl:grid-cols-3";
   const selfName = store.self?.displayName ?? sessionStorage.getItem("displayName") ?? "You";
   const copyLink = () => void navigator.clipboard.writeText(`${window.location.origin}/${meetingId}`);
   const firstRequest = store.pendingRequests[0];
   const isHost = store.self?.role === "HOST";
 
-  const primaryScreen = useMemo(() => remoteVideos.find((remote) => remote.appData?.source === "screen"), [remoteVideos]);
+  const remoteScreen = useMemo(() => remoteVideos.find((remote) => remote.appData?.source === "screen"), [remoteVideos]);
+  const primaryScreen = store.screenStream
+    ? { stream: store.screenStream, name: `${selfName}'s presentation`, participantId: store.self?.id }
+    : remoteScreen
+      ? { stream: remoteScreen.stream, name: `${participants.find((participant) => participant.id === remoteScreen.participantId)?.displayName ?? "Guest"}'s presentation`, participantId: remoteScreen.participantId }
+      : undefined;
+
+  const stopScreenShare = async () => {
+    const current = useMeetingStore.getState();
+    if (!current.self || !current.screenStream) return;
+    current.screenStream.getTracks().forEach((track) => track.stop());
+    meetMediaClient.stopScreen();
+    current.setScreenStream(undefined);
+    await emitAck("stop-screen-share", { meetingId, participantId: current.self.id });
+  };
 
   const shareScreen = async () => {
     if (!store.self) return;
+    if (store.screenStream) {
+      await stopScreenShare();
+      return;
+    }
     const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     store.setScreenStream(stream);
     await meetMediaClient.publishScreen(meetingId, store.self.id, stream);
     await emitAck("start-screen-share", { meetingId, participantId: store.self.id });
-    stream.getVideoTracks()[0]?.addEventListener("ended", async () => {
-      await emitAck("stop-screen-share", { meetingId, participantId: store.self?.id });
-      store.setScreenStream(undefined);
-    });
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => void stopScreenShare(), { once: true });
+  };
+
+  const leaveMeeting = async () => {
+    const current = useMeetingStore.getState();
+    if (current.self) await emitAck("leave-meeting", { meetingId, participantId: current.self.id }).catch(() => undefined);
+    router.push("/");
   };
 
   const decideRequest = async (participantId: string, admit: boolean) => {
@@ -112,19 +153,34 @@ export function MeetingRoom({ meetingId, hostParticipantId }: { meetingId: strin
         <div className="min-h-0 flex-1 bg-[#17130d] p-2 sm:p-3">
           {primaryScreen ? (
             <div className="grid h-full gap-3 lg:grid-cols-[1fr_260px]">
-              <VideoTile name="Screen share" stream={primaryScreen.stream} isScreen className="h-full" />
+              <VideoTile name={primaryScreen.name} stream={primaryScreen.stream} isScreen className="h-full" />
               <div className="grid content-start gap-3 overflow-y-auto">
-                <VideoTile name={selfName} stream={store.localStream} muted micEnabled={deviceState.micEnabled} className="aspect-video" />
-                {remoteVideos.filter((remote) => remote.id !== primaryScreen.id).map((remote) => (
-                  <VideoTile key={remote.id} name={participants.find((p) => p.id === remote.participantId)?.displayName ?? "Guest"} stream={remote.stream} className="aspect-video" />
+                <VideoTile name={selfName} stream={store.localStream} muted micEnabled={deviceState.micEnabled} videoEnabled={deviceState.cameraEnabled} className="aspect-video" />
+                {remoteParticipants.map((participant) => (
+                  <VideoTile
+                    key={participant.id}
+                    name={participant.displayName}
+                    stream={remoteVideos.find((remote) => remote.participantId === participant.id && remote.appData?.source === "camera")?.stream}
+                    micEnabled={participant.micEnabled}
+                    videoEnabled={participant.cameraEnabled}
+                    className="aspect-video"
+                  />
                 ))}
               </div>
             </div>
           ) : (
             <div className={`grid h-full grid-cols-1 content-center items-center gap-2 sm:gap-3 ${gridClass}`}>
-              <VideoTile name={selfName} stream={store.localStream} muted micEnabled={deviceState.micEnabled} className="aspect-video max-h-full" />
-              {remoteVideos.map((remote) => (
-                <VideoTile key={remote.id} name={participants.find((p) => p.id === remote.participantId)?.displayName ?? "Guest"} stream={remote.stream} className="aspect-video max-h-full" onPin={() => store.setPinnedParticipantId(remote.participantId)} />
+              <VideoTile name={selfName} stream={store.localStream} muted micEnabled={deviceState.micEnabled} videoEnabled={deviceState.cameraEnabled} className="aspect-video max-h-full" />
+              {remoteParticipants.map((participant) => (
+                <VideoTile
+                  key={participant.id}
+                  name={participant.displayName}
+                  stream={remoteVideos.find((remote) => remote.participantId === participant.id && remote.appData?.source === "camera")?.stream}
+                  micEnabled={participant.micEnabled}
+                  videoEnabled={participant.cameraEnabled}
+                  className="aspect-video max-h-full"
+                  onPin={() => store.setPinnedParticipantId(participant.id)}
+                />
               ))}
             </div>
           )}
@@ -174,10 +230,10 @@ export function MeetingRoom({ meetingId, hostParticipantId }: { meetingId: strin
           }} aria-label="Camera">
             {deviceState.cameraEnabled ? <Camera className="h-5 w-5" /> : <CameraOff className="h-5 w-5" />}
           </Button>
-          <Button size="icon" variant="secondary" onClick={() => void shareScreen()} aria-label="Share screen">
-            <MonitorUp className="h-5 w-5" />
+          <Button size="icon" variant={store.screenStream ? "destructive" : "secondary"} onClick={() => void shareScreen()} aria-label={store.screenStream ? "Stop sharing screen" : "Share screen"}>
+            {store.screenStream ? <MonitorOff className="h-5 w-5" /> : <MonitorUp className="h-5 w-5" />}
           </Button>
-          <Button size="icon" variant="destructive" onClick={() => router.push("/")} aria-label="Leave">
+          <Button size="icon" variant="destructive" onClick={() => void leaveMeeting()} aria-label="Leave">
             <LogOut className="h-5 w-5" />
           </Button>
           <Button size="icon" variant="secondary" onClick={() => {

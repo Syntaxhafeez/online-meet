@@ -51,6 +51,17 @@ export function registerSocketHandlers(io: Server) {
       }
     });
 
+    socket.on(ClientEvents.LeaveMeeting, async (payload, ack: Ack | undefined) => {
+      try {
+        const data = z.object({ meetingId: z.string(), participantId: z.string() }).parse(payload);
+        if (socket.data.participantId !== data.participantId || socket.data.meetingId !== data.meetingId) throw new Error("Invalid participant");
+        await leaveMeeting(io, socket, data.meetingId, data.participantId);
+        safeAck(ack, true);
+      } catch (error) {
+        failAck(ack, error);
+      }
+    });
+
     socket.on(ClientEvents.RequestJoin, async (payload, ack: Ack | undefined) => {
       try {
         const data = requestJoinPayload.parse(payload);
@@ -111,7 +122,18 @@ export function registerSocketHandlers(io: Server) {
     socket.on(ClientEvents.ToggleMic, (payload, ack) => updateParticipantMedia(io, payload, ack, { field: "micEnabled" }));
     socket.on(ClientEvents.ToggleCamera, (payload, ack) => updateParticipantMedia(io, payload, ack, { field: "cameraEnabled" }));
     socket.on(ClientEvents.StartScreenShare, (payload, ack) => updateParticipantMedia(io, payload, ack, { field: "screenSharing", value: true }));
-    socket.on(ClientEvents.StopScreenShare, (payload, ack) => updateParticipantMedia(io, payload, ack, { field: "screenSharing", value: false }));
+    socket.on(ClientEvents.StopScreenShare, async (payload, ack: Ack | undefined) => {
+      try {
+        const data = z.object({ meetingId: z.string(), participantId: z.string() }).parse(payload);
+        const participant = await participantService.updateMedia(data.participantId, { screenSharing: false });
+        mediasoupManager.closeProducersBySource(data.meetingId, data.participantId, "screen");
+        io.to(data.meetingId).emit(ServerEvents.ProducerClosed, { participantId: data.participantId, source: "screen" });
+        io.to(data.meetingId).emit(ServerEvents.ParticipantUpdated, participant);
+        safeAck(ack, participant);
+      } catch (error) {
+        failAck(ack, error);
+      }
+    });
 
     registerMediasoupHandlers(io, socket);
 
@@ -128,13 +150,20 @@ export function registerSocketHandlers(io: Server) {
       const meetingId = socket.data.meetingId;
       const participantId = socket.data.participantId;
       if (meetingId && participantId && socket.data.inMeeting) {
-        mediasoupManager.closePeer(meetingId, participantId);
-        await participantService.leaveBySocket(socket.id);
-        io.to(meetingId).emit(ServerEvents.UserLeft, { participantId });
-        io.to(meetingId).emit(ServerEvents.MeetingState, await meetingService.get(meetingId));
+        await leaveMeeting(io, socket, meetingId, participantId);
       }
     });
   });
+}
+
+async function leaveMeeting(io: Server, socket: Socket, meetingId: string, participantId: string) {
+  if (!socket.data.inMeeting) return;
+  socket.data.inMeeting = false;
+  mediasoupManager.closePeer(meetingId, participantId);
+  await participantService.leave(participantId, socket.id);
+  socket.leave(meetingId);
+  io.to(meetingId).emit(ServerEvents.UserLeft, { participantId });
+  io.to(meetingId).emit(ServerEvents.MeetingState, await meetingService.get(meetingId));
 }
 
 async function updateParticipantMedia(io: Server, payload: unknown, ack: Ack | undefined, options: { field: "micEnabled" | "cameraEnabled" | "screenSharing"; value?: boolean }) {

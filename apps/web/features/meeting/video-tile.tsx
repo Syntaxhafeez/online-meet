@@ -10,6 +10,7 @@ export function VideoTile({
   stream,
   muted,
   micEnabled = true,
+  videoEnabled = true,
   isScreen,
   onPin,
   className
@@ -18,22 +19,27 @@ export function VideoTile({
   stream?: MediaStream;
   muted?: boolean;
   micEnabled?: boolean;
+  videoEnabled?: boolean;
   isScreen?: boolean;
   onPin?: () => void;
   className?: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const hasVideo = Boolean(stream?.getVideoTracks().length);
+  const hasVideo = videoEnabled && Boolean(stream?.getVideoTracks().some((track) => track.readyState === "live"));
   const initial = name.trim().slice(0, 1).toUpperCase() || "?";
   const avatarTone = getAvatarTone(name);
 
   useEffect(() => {
-    if (!ref.current || !stream) return;
+    if (!ref.current) return;
+    if (!stream || !hasVideo) {
+      ref.current.srcObject = null;
+      return;
+    }
     ref.current.srcObject = stream;
     void ref.current.play().catch(() => {
       // The user has already interacted with the meeting controls, but keep this safe for stricter browsers.
     });
-  }, [stream]);
+  }, [hasVideo, stream]);
 
   return (
     <div className={cn("group relative min-h-36 overflow-hidden rounded-lg bg-[#0f0c08] shadow-[0_12px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/10", className)}>

@@ -110,6 +110,20 @@ class MediasoupManager {
     );
   }
 
+  closeProducersBySource(meetingId: string, participantId: string, source: string) {
+    const peer = this.findPeer(meetingId, participantId);
+    if (!peer) return [];
+    const producerIds = [...peer.producers.values()]
+      .filter((producer) => producer.appData.source === source)
+      .map((producer) => producer.id);
+    producerIds.forEach((producerId) => {
+      const producer = peer.producers.get(producerId);
+      producer?.close();
+      peer.producers.delete(producerId);
+    });
+    return producerIds;
+  }
+
   closePeer(meetingId: string, participantId: string) {
     const room = this.rooms.get(meetingId);
     const peer = room?.peers.get(participantId);

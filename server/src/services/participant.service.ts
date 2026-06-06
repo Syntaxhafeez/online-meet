@@ -35,6 +35,13 @@ export class ParticipantService {
     });
   }
 
+  async leave(participantId: string, socketId: string) {
+    return prisma.participant.updateMany({
+      where: { id: participantId, socketId, status: "ADMITTED" },
+      data: { status: "LEFT", leftAt: new Date(), socketId: null, screenSharing: false }
+    });
+  }
+
   async updateMedia(participantId: string, data: Partial<{ micEnabled: boolean; cameraEnabled: boolean; screenSharing: boolean }>) {
     return prisma.participant.update({ where: { id: participantId }, data });
   }

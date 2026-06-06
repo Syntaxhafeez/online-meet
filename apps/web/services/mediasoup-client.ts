@@ -45,6 +45,30 @@ export class MeetMediaClient {
     for (const track of stream.getVideoTracks()) await this.produceTrack(meetingId, participantId, track, { source: "screen" });
   }
 
+  stopScreen() {
+    this.producers.forEach((producer, id) => {
+      if (producer.appData.source !== "screen") return;
+      producer.close();
+      this.producers.delete(id);
+    });
+  }
+
+  removeParticipant(participantId: string) {
+    this.consumers.forEach((consumer, id) => {
+      if (consumer.appData.participantId !== participantId) return;
+      consumer.close();
+      this.consumers.delete(id);
+    });
+  }
+
+  removeParticipantSource(participantId: string, source: string) {
+    this.consumers.forEach((consumer, id) => {
+      if (consumer.appData.participantId !== participantId || consumer.appData.source !== source) return;
+      consumer.close();
+      this.consumers.delete(id);
+    });
+  }
+
   close() {
     this.consumers.forEach((consumer) => consumer.close());
     this.producers.forEach((producer) => producer.close());
@@ -107,10 +131,15 @@ export class MeetMediaClient {
       transportId: this.recvTransport.id,
       rtpCapabilities: this.device.rtpCapabilities
     });
-    const consumer = await this.recvTransport.consume({ id: params.id, producerId, kind: params.kind, rtpParameters: params.rtpParameters });
+    const appData: Record<string, unknown> = { ...params.appData, participantId: remoteParticipantId };
+    const consumer = await this.recvTransport.consume({ id: params.id, producerId, kind: params.kind, rtpParameters: params.rtpParameters, appData });
     this.consumers.set(consumer.id, consumer);
     const stream = new MediaStream([consumer.track]);
-    useMeetingStore.getState().addRemote({ id: consumer.id, participantId: remoteParticipantId, kind: params.kind, stream, appData: params.appData });
+    useMeetingStore.getState().addRemote({ id: consumer.id, participantId: remoteParticipantId, kind: params.kind, stream, appData });
+    consumer.on("trackended", () => {
+      this.consumers.delete(consumer.id);
+      useMeetingStore.getState().removeParticipantMediaSource(remoteParticipantId, String(appData.source ?? ""));
+    });
     await emitAck("mediasoup:resume-consumer", { meetingId, participantId, consumerId: consumer.id });
     consumer.resume();
   }
