@@ -13,8 +13,21 @@ export class ParticipantService {
     });
   }
 
-  async attachSocket(participantId: string, socketId: string) {
-    return prisma.participant.update({ where: { id: participantId }, data: { socketId } });
+  async attachSocket(participantId: string, meetingId: string, socketId: string) {
+    const existing = await prisma.participant.findFirst({
+      where: { id: participantId, meetingId, status: { in: ["ADMITTED", "LEFT"] } }
+    });
+    if (!existing) throw new Error("This rejoin pass is no longer valid");
+    return prisma.participant.update({
+      where: { id: participantId },
+      data: {
+        socketId,
+        status: "ADMITTED",
+        joinedAt: new Date(),
+        leftAt: null,
+        screenSharing: false
+      }
+    });
   }
 
   async admit(participantId: string) {

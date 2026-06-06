@@ -19,6 +19,7 @@ export class MeetMediaClient {
   private recvTransport?: Transport;
   private producers = new Map<string, Producer>();
   private consumers = new Map<string, Consumer>();
+  private newProducerHandler?: (producer: { producerId?: string; id?: string; participantId: string }) => void;
 
   async join(meetingId: string, participantId: string, localStream: MediaStream) {
     const routerRtpCapabilities = await emitAck<mediasoupClient.types.RtpCapabilities>("mediasoup:get-router-rtp-capabilities", { meetingId });
@@ -35,10 +36,12 @@ export class MeetMediaClient {
     const existing = await emitAck<Array<{ producerId: string; participantId: string }>>("join-producers:list", { meetingId, participantId }).catch(() => []);
     await Promise.all(existing.map((producer) => this.consume(meetingId, participantId, producer.producerId, producer.participantId)));
 
-    getSocket().on("mediasoup:new-producer", (producer: { producerId?: string; id?: string; participantId: string }) => {
+    if (this.newProducerHandler) getSocket().off("mediasoup:new-producer", this.newProducerHandler);
+    this.newProducerHandler = (producer) => {
       const producerId = producer.producerId ?? producer.id;
       if (producerId && producer.participantId !== participantId) void this.consume(meetingId, participantId, producerId, producer.participantId);
-    });
+    };
+    getSocket().on("mediasoup:new-producer", this.newProducerHandler);
   }
 
   async publishScreen(meetingId: string, participantId: string, stream: MediaStream) {
@@ -70,10 +73,17 @@ export class MeetMediaClient {
   }
 
   close() {
+    if (this.newProducerHandler) getSocket().off("mediasoup:new-producer", this.newProducerHandler);
+    this.newProducerHandler = undefined;
     this.consumers.forEach((consumer) => consumer.close());
     this.producers.forEach((producer) => producer.close());
     this.sendTransport?.close();
     this.recvTransport?.close();
+    this.consumers.clear();
+    this.producers.clear();
+    this.sendTransport = undefined;
+    this.recvTransport = undefined;
+    this.device = undefined;
   }
 
   private async createTransport(meetingId: string, participantId: string, direction: "send" | "recv") {

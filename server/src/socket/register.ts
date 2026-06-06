@@ -34,7 +34,7 @@ export function registerSocketHandlers(io: Server) {
         const meeting = await meetingService.get(data.meetingId);
         if (!meeting) throw new Error("Meeting not found");
         const participant = data.participantId
-          ? await participantService.attachSocket(data.participantId, socket.id)
+          ? await participantService.attachSocket(data.participantId, data.meetingId, socket.id)
           : meeting.participants.find((p: Participant) => p.role === "HOST");
         if (!participant || participant.status !== "ADMITTED") throw new Error("Participant is not admitted");
         socket.data.meetingId = data.meetingId;

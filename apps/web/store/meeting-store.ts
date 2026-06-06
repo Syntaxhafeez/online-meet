@@ -27,6 +27,7 @@ type MeetingStore = {
   addRequest: (participant: Participant) => void;
   removeRequest: (participantId: string) => void;
   clearRequests: () => void;
+  resetCall: () => void;
 };
 
 export const useMeetingStore = create<MeetingStore>((set, get) => ({
@@ -73,5 +74,23 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
   setParticipantsOpen: (participantsOpen) => set({ participantsOpen }),
   addRequest: (participant) => set((state) => ({ pendingRequests: [...state.pendingRequests.filter((p) => p.id !== participant.id), participant] })),
   removeRequest: (participantId) => set((state) => ({ pendingRequests: state.pendingRequests.filter((p) => p.id !== participantId) })),
-  clearRequests: () => set({ pendingRequests: [] })
+  clearRequests: () => set({ pendingRequests: [] }),
+  resetCall: () =>
+    set((state) => {
+      state.localStream?.getTracks().forEach((track) => track.stop());
+      state.screenStream?.getTracks().forEach((track) => track.stop());
+      state.remotes.forEach((remote) => remote.stream.getTracks().forEach((track) => track.stop()));
+      return {
+        meeting: undefined,
+        self: undefined,
+        localStream: undefined,
+        screenStream: undefined,
+        remotes: [],
+        pinnedParticipantId: undefined,
+        chatOpen: false,
+        participantsOpen: false,
+        unread: 0,
+        pendingRequests: []
+      };
+    })
 }));

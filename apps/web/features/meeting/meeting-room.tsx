@@ -54,7 +54,8 @@ export function MeetingRoom({ meetingId, hostParticipantId }: { meetingId: strin
 
     async function boot() {
       try {
-        const stream = store.localStream ?? (await startPreview());
+        const existingStream = useMeetingStore.getState().localStream;
+        const stream = existingStream?.getTracks().some((track) => track.readyState === "live") ? existingStream : await startPreview();
         const join = await emitAck<{ participant: typeof store.self; meeting: typeof store.meeting }>("join-meeting", { meetingId, participantId: hostParticipantId });
         if (!mounted || !join.participant) return;
         store.setSelf(join.participant);
@@ -80,6 +81,7 @@ export function MeetingRoom({ meetingId, hostParticipantId }: { meetingId: strin
       meetMediaClient.close();
       current.localStream?.getTracks().forEach((track) => track.stop());
       current.screenStream?.getTracks().forEach((track) => track.stop());
+      current.resetCall();
     };
   }, []);
 
@@ -126,6 +128,8 @@ export function MeetingRoom({ meetingId, hostParticipantId }: { meetingId: strin
   const leaveMeeting = async () => {
     const current = useMeetingStore.getState();
     if (current.self) await emitAck("leave-meeting", { meetingId, participantId: current.self.id }).catch(() => undefined);
+    meetMediaClient.close();
+    current.resetCall();
     router.push("/");
   };
 
