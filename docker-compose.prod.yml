@@ -1,4 +1,17 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - server
+
   coturn:
     image: coturn/coturn:4.6
     restart: unless-stopped
@@ -29,6 +42,11 @@ services:
     environment:
       NODE_ENV: production
     ports:
-      - "4000:4000"
       - "40000-40100:40000-40100/tcp"
       - "40000-40100:40000-40100/udp"
+    expose:
+      - "4000"
+
+volumes:
+  caddy-data:
+  caddy-config:
